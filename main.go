@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -8,7 +9,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -181,14 +184,27 @@ func main() {
 		go func() {
 			for range time.Tick(time.Duration(config.Heartbeat)) {
 				logger.Info("Server heartbeat")
-				os.Exit(0)
+				server := startServer(&config, logger)
+				stopServer(server, logger)
 			}
 		}()
 	}
 
+	// Start the initial server
+	server := startServer(&config, logger)
+
+	// Wait for termination signal
+	waitForTerminationSignal()
+
+	// Stop the server before exiting
+	stopServer(server, logger)
+}
+
+// startServer creates and starts the HTTP server
+func startServer(config *Config, logger *logrus.Logger) *http.Server {
 	// Create a new CDNHandler with the configuration
 	cdnHandler := &CDNHandler{
-		Config: config,
+		Config: *config,
 		Logger: logger,
 	}
 
@@ -201,6 +217,34 @@ func main() {
 		WriteTimeout: 10 * time.Second,
 	}
 
-	logger.Infof("Starting CDN server on port %s", config.Port)
-	log.Fatal(server.ListenAndServe())
+	// Start the server in a separate goroutine
+	go func() {
+		logger.Infof("Starting CDN server on port %s", config.Port)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Fatalf("Server error: %v", err)
+		}
+	}()
+
+	return server
+}
+
+// stopServer stops the HTTP server
+func stopServer(server *http.Server, logger *logrus.Logger) {
+	logger.Info("Stopping CDN server")
+
+	// Set a deadline for gracefully shutting down the server
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Shut down the server with the given context
+	if err := server.Shutdown(ctx); err != nil {
+		logger.Errorf("Server shutdown error: %v", err)
+	}
+}
+
+// waitForTerminationSignal waits for termination signals to gracefully shut down the server
+func waitForTerminationSignal() {
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+	<-quit
 }
