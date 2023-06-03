@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 
 	"github.com/go-chi/chi"
@@ -56,6 +57,12 @@ func main() {
 	address := fmt.Sprintf(":%s", config.ServicePort)
 	logger.Infof("Starting CDN server on port %s...", config.ServicePort)
 	logger.Infof("Serving files from %s", config.UploadsDir)
+
+	// Print upload path and list files
+	uploadPath := filepath.Join(".", config.UploadsDir)
+	logger.Infof("Upload path: %s", uploadPath)
+	listFiles(uploadPath)
+
 	err = http.ListenAndServe(address, router)
 	if err != nil {
 		logger.Fatalf("Server error: %s", err)
@@ -63,16 +70,36 @@ func main() {
 }
 
 func loadConfig(filename string) error {
-	file, err := os.Open(filename)
+	// Get the absolute path of the main.go file
+	_, currentFile, _, _ := runtime.Caller(1)
+	currentDir := filepath.Dir(currentFile)
+
+	// Construct the absolute path for the config file
+	configPath := filepath.Join(currentDir, filename)
+
+	// Open the config file
+	file, err := os.Open(configPath)
 	if err != nil {
 		return fmt.Errorf("error opening config file: %s", err)
 	}
 	defer file.Close()
 
+	// Decode the config file into the config variable
 	decoder := json.NewDecoder(file)
 	err = decoder.Decode(&config)
 	if err != nil {
 		return fmt.Errorf("error decoding config file: %s", err)
+	}
+
+	// Set the relative path for the uploads directory
+	config.UploadsDir = filepath.Join(currentDir, filepath.FromSlash(config.UploadsDir))
+
+	// Create the uploads directory if it doesn't exist
+	if _, err := os.Stat(config.UploadsDir); os.IsNotExist(err) {
+		err := os.MkdirAll(config.UploadsDir, os.ModePerm)
+		if err != nil {
+			return fmt.Errorf("error creating uploads directory: %s", err)
+		}
 	}
 
 	return nil
@@ -92,7 +119,7 @@ func serveCDN(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get the requested file path
-	filePath := filepath.Join(config.UploadsDir, r.URL.Path)
+	filePath := filepath.Join(config.UploadsDir, filepath.Clean(r.URL.Path))
 
 	// Check if the file exists
 	_, err := os.Stat(filePath)
@@ -152,8 +179,8 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 	// Create the uploads directory if it doesn't exist
 	err = os.MkdirAll(config.UploadsDir, os.ModePerm)
 	if err != nil {
-		logger.Error("Internal Server Error:", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		logger.Error("Error creating uploads directory:", err)
+		http.Error(w, "Error creating uploads directory", http.StatusInternalServerError)
 		return
 	}
 
@@ -177,7 +204,6 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 	logger.Infof("File uploaded successfully: %s", filename)
 	fmt.Fprintf(w, "File uploaded successfully!")
 }
-
 func checkAuthentication(r *http.Request) bool {
 	username, password, ok := r.BasicAuth()
 	return ok && username == config.Username && password == config.Password
@@ -189,4 +215,23 @@ func sanitizeFilename(filename string) string {
 
 func isValidFilename(filename string) bool {
 	return filenameRegex.MatchString(filename)
+}
+
+func listFiles(dirPath string) {
+	logger.Infof("Files in %s:", dirPath)
+
+	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			logger.Errorf("Error accessing file: %s", err)
+			return nil
+		}
+		if !info.IsDir() {
+			logger.Infof("- %s", path)
+		}
+		return nil
+	})
+
+	if err != nil {
+		logger.Errorf("Error listing files: %s", err)
+	}
 }
