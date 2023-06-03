@@ -72,10 +72,14 @@ Example config.json file:
 {
   "port": "8080",
   "max_upload_size": 10485760,
-  "heartbeat": "1h",
-  "require_auth": true,
-  "auth_username": "your-username",
-  "auth_password": "your-password"
+  "heartbeat": "60s",
+  "require_auth": false,
+  "auth_username": "",
+  "auth_password": "",
+  "upload_directory": "uploads",
+  "rate_limit_enabled": true,
+  "rate_limit_burst": 10,
+  "rate_limit_requests": 1
 }
 ```
 
