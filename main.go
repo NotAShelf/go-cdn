@@ -4,17 +4,17 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
-    "io"
 	"path/filepath"
 )
 
 const (
-	uploadPath = "uploads/"   // Directory to store uploaded files
-	username   = "admin"      // Username for authentication
-	password   = "password"   // Password for authentication
+	uploadPath = "uploads" // Directory to store uploaded files
+	username   = "admin"   // Username for authentication
+	password   = "password" // Password for authentication
 )
 
 func main() {
@@ -39,7 +39,7 @@ func serveCDN(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get the requested file path
-	filePath := filepath.Join("src", r.URL.Path)
+	filePath := filepath.Join(uploadPath, r.URL.Path)
 
 	// Check if the file exists
 	_, err := os.Stat(filePath)
@@ -112,10 +112,5 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 
 func checkAuthentication(r *http.Request) bool {
 	username, password, ok := r.BasicAuth()
-	if ok && username == "admin" && password == "password" {
-		log.Println("Authentication successful")
-		return true
-	}
-	log.Println("Authentication failed")
-	return false
+	return ok && username == username && password == password
 }
