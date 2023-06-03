@@ -1,5 +1,8 @@
-name: Go Build
+# Go Build & Release CI
+name: Go Build & Release CI
 
+# Controls when the action will run. Triggers the workflow on push or pull request
+# events but only for the master branch
 on:
   push:
     branches:
@@ -7,22 +10,21 @@ on:
   pull_request:
     branches:
       - main
-
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v2
+      - name: Checkout
+        uses: actions/checkout@latest
+        with:
+          fetch-depth: 0
+      - run: git fetch --force --tags
 
       - name: Set up Go
-        uses: actions/setup-go@v2
+        uses: actions/setup-go@v4
         with:
-          go-version: 1.20
-
-      - name: Install external dependencies
-        run: go mod download
+          go-version: "1.20.x"
+          cache: true
 
       - name: Build
-        run: go build -o go-cdn
+        run: go build -v ./...
