@@ -1,8 +1,7 @@
-// main.go
-
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -11,18 +10,39 @@ import (
 	"path/filepath"
 )
 
-const (
-	uploadPath = "uploads" // Directory to store uploaded files
-	username   = "admin"   // Username for authentication
-	password   = "password" // Password for authentication
+type Config struct {
+	Username    string `json:"username"`
+	Password    string `json:"password"`
+	ServicePort string `json:"service_port"`
+	UploadsDir  string `json:"uploads_dir"`
+}
+
+var (
+	config Config
 )
 
 func main() {
+	loadConfig("config.json")
+
 	http.HandleFunc("/", serveCDN)
 	http.HandleFunc("/upload", handleUpload)
 
-	log.Println("Starting CDN server on port 8080...")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	log.Printf("Starting CDN server on port %s...\n", config.ServicePort)
+	log.Fatal(http.ListenAndServe(":"+config.ServicePort, nil))
+}
+
+func loadConfig(filename string) {
+	file, err := os.Open(filename)
+	if err != nil {
+		log.Fatal("Error opening config file:", err)
+	}
+	defer file.Close()
+
+	decoder := json.NewDecoder(file)
+	err = decoder.Decode(&config)
+	if err != nil {
+		log.Fatal("Error decoding config file:", err)
+	}
 }
 
 func serveCDN(w http.ResponseWriter, r *http.Request) {
@@ -39,7 +59,7 @@ func serveCDN(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get the requested file path
-	filePath := filepath.Join(uploadPath, r.URL.Path)
+	filePath := filepath.Join(config.UploadsDir, r.URL.Path)
 
 	// Check if the file exists
 	_, err := os.Stat(filePath)
@@ -82,7 +102,7 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 	defer file.Close()
 
 	// Create the uploads directory if it doesn't exist
-	err = os.MkdirAll(uploadPath, os.ModePerm)
+	err = os.MkdirAll(config.UploadsDir, os.ModePerm)
 	if err != nil {
 		log.Println("Internal Server Error")
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
@@ -90,7 +110,7 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create a new file in the uploads directory
-	dst, err := os.Create(filepath.Join(uploadPath, header.Filename))
+	dst, err := os.Create(filepath.Join(config.UploadsDir, header.Filename))
 	if err != nil {
 		log.Println("Internal Server Error")
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
@@ -112,5 +132,5 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 
 func checkAuthentication(r *http.Request) bool {
 	username, password, ok := r.BasicAuth()
-	return ok && username == username && password == password
+	return ok && username == config.Username && password == config.Password
 }
