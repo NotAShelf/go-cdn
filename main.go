@@ -4,10 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+
+	"github.com/go-chi/chi"
+	"github.com/go-chi/chi/middleware"
+	"github.com/sirupsen/logrus"
 )
 
 type Config struct {
@@ -17,41 +20,62 @@ type Config struct {
 	UploadsDir  string `json:"uploads_dir"`
 }
 
-var (
-	config Config
-)
+var config Config
+var logger *logrus.Logger
 
 func main() {
-	loadConfig("config.json")
+	// Initialize logger
+	logger = logrus.New()
+	logger.Formatter = &logrus.TextFormatter{
+		DisableTimestamp: false,
+		FullTimestamp:    true,
+	}
 
-	http.HandleFunc("/", serveCDN)
-	http.HandleFunc("/upload", handleUpload)
+	// Load configuration
+	err := loadConfig("config.json")
+	if err != nil {
+		logger.Fatalf("Error loading config file: %s", err)
+	}
 
-	log.Printf("Starting CDN server on port %s...\n", config.ServicePort)
-	log.Fatal(http.ListenAndServe(":"+config.ServicePort, nil))
+	// Initialize router
+	router := chi.NewRouter()
+	router.Use(middleware.Logger)
+
+	router.HandleFunc("/", serveCDN)
+	router.HandleFunc("/upload", handleUpload)
+
+	// Start server
+	address := fmt.Sprintf(":%s", config.ServicePort)
+	logger.Infof("Starting CDN server on port %s...", config.ServicePort)
+	err = http.ListenAndServe(address, router)
+	if err != nil {
+		logger.Fatalf("Server error: %s", err)
+	}
 }
 
-func loadConfig(filename string) {
+func loadConfig(filename string) error {
 	file, err := os.Open(filename)
 	if err != nil {
-		log.Fatal("Error opening config file:", err)
+		return fmt.Errorf("error opening config file: %s", err)
 	}
 	defer file.Close()
 
 	decoder := json.NewDecoder(file)
 	err = decoder.Decode(&config)
 	if err != nil {
-		log.Fatal("Error decoding config file:", err)
+		return fmt.Errorf("error decoding config file: %s", err)
 	}
+
+	return nil
 }
 
 func serveCDN(w http.ResponseWriter, r *http.Request) {
 	// Log the request information
-	log.Printf("Received request: %s %s", r.Method, r.URL.Path)
+	logger.Infof("Received request: %s %s", r.Method, r.URL.Path)
 
 	// Check if the request has valid authentication
 	if !checkAuthentication(r) {
-		log.Println("Authentication failed")
+		logger.Warn("Authentication failed")
 		w.Header().Set("WWW-Authenticate", `Basic realm="CDN Authentication"`)
 		w.WriteHeader(http.StatusUnauthorized)
 		fmt.Fprintf(w, "401 Unauthorized\n")
@@ -65,27 +89,27 @@ func serveCDN(w http.ResponseWriter, r *http.Request) {
 	_, err := os.Stat(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			log.Printf("File not found: %s", r.URL.Path)
+			logger.Infof("File not found: %s", r.URL.Path)
 			http.NotFound(w, r)
 		} else {
-			log.Println("Internal Server Error")
+			logger.Error("Internal Server Error:", err)
 			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		}
 		return
 	}
 
 	// Serve the file
-	log.Printf("Serving file: %s", r.URL.Path)
+	logger.Infof("Serving file: %s", r.URL.Path)
 	http.ServeFile(w, r, filePath)
 }
 
 func handleUpload(w http.ResponseWriter, r *http.Request) {
 	// Log the request information
-	log.Printf("Received upload request: %s %s", r.Method, r.URL.Path)
+	logger.Infof("Received upload request: %s %s", r.Method, r.URL.Path)
 
 	// Check if the request has valid authentication
 	if !checkAuthentication(r) {
-		log.Println("Authentication failed")
+		logger.Warn("Authentication failed")
 		w.Header().Set("WWW-Authenticate", `Basic realm="CDN Authentication"`)
 		w.WriteHeader(http.StatusUnauthorized)
 		fmt.Fprintf(w, "401 Unauthorized\n")
@@ -95,7 +119,7 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 	// Parse the uploaded file
 	file, header, err := r.FormFile("file")
 	if err != nil {
-		log.Println("Bad Request")
+		logger.Error("Bad Request:", err)
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
@@ -104,7 +128,7 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 	// Create the uploads directory if it doesn't exist
 	err = os.MkdirAll(config.UploadsDir, os.ModePerm)
 	if err != nil {
-		log.Println("Internal Server Error")
+		logger.Error("Internal Server Error:", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
@@ -112,7 +136,7 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 	// Create a new file in the uploads directory
 	dst, err := os.Create(filepath.Join(config.UploadsDir, header.Filename))
 	if err != nil {
-		log.Println("Internal Server Error")
+		logger.Error("Internal Server Error:", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
@@ -121,12 +145,12 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 	// Copy the uploaded file to the destination
 	_, err = io.Copy(dst, file)
 	if err != nil {
-		log.Println("Internal Server Error")
+		logger.Error("Internal Server Error:", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
-	log.Printf("File uploaded successfully: %s", header.Filename)
+	logger.Infof("File uploaded successfully: %s", header.Filename)
 	fmt.Fprintf(w, "File uploaded successfully!")
 }
 
